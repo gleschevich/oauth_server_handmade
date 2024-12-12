@@ -1,7 +1,7 @@
 from flask import Flask
-from flask import make_response
+
 from flask import request
-from flask import abort, jsonify
+from flask import abort
 from flask import redirect
 from authlib.integrations.flask_client import OAuth
 import psycopg2
@@ -10,20 +10,48 @@ import secrets
 import string
 import random
 import hashlib
+import json
 
-####HASH AND SALT PASSWORD####
+
+WHITE_LIST_REDIRECT_URL = [
+    "http://localhost:5001/home",
+    "http://localhost:5000/logged-in",
+    "http://localhost:5000/login",
+    "http://localhost:5001/credentials",
+    "http://localhost:5001/access_token"
+]
+
+def is_safe_redirect_url(url):
+    from urllib.parse import urlparse, urljoin
+
+    # Parse the provided URL
+    host_url = request.host_url  # Base URL of your application
+    target_url = urljoin(host_url, url)  # Resolve relative URLs to full URLs
+
+    # Ensure the target URL starts with the base URL or is in the whitelist
+    parsed_target_url = urlparse(target_url)
+    return any(
+        target_url.startswith(allowed) or
+        (parsed_target_url.netloc in [urlparse(allowed).netloc] and parsed_target_url.scheme in ["http", "https"])
+        for allowed in WHITE_LIST_REDIRECT_URL
+    )
+
+
+####HASH  PASSWORD####
 def hash_password(password:str):
     password_bytes = password.encode('utf-8')
     hashed_password = hashlib.sha256(password_bytes).hexdigest()
     return hashed_password
-
+####GENERATE RANDOM STRING FOR SHORT LIVED TOKEN####
 def generate_random_string(length=16):
     characters = string.ascii_letters + string.digits  # A-Z, a-z, 0-9
     return ''.join(secrets.choice(characters) for _ in range(length))
 
+####GENERATE RANDOM INTEGER FOR TOKEN ID####
 def generate_random_id(min_value=1, max_value=1000000):
     return random.randint(min_value, max_value)
 
+####DELETE EXPIRED TOKEN FROM DB####
 def delete_expired_tokens():
     connection = psycopg2.connect(host="localhost", database="cct",port=5432, user="gleschevich", password="32220")
     cursor = connection.cursor()
@@ -38,6 +66,7 @@ def delete_expired_tokens():
 
 app = Flask(__name__)
 
+####CHECK THAT PASSWORD IS SECURE####
 def pass_validation(password:str):
     low,up,dig,sym=0,0,0,0
     if (len(password)>=12):
@@ -58,9 +87,9 @@ def pass_validation(password:str):
         print("Invalid password!")
         return False
 
-
+####CHECK THAT USER IS INBETWEEN 8 AND 30 CHARACTERS AND ALPHANUMERIC####
 def user_validation(user:str):
-    if (len(user)>8 and len(user)<=30):
+    if (len(user)>=8 and len(user)<=30):
         if (user.isalnum):
             print ("User name valid!")
             return True
@@ -73,23 +102,24 @@ def user_validation(user:str):
 
 
 
-
+####CHECK OR CREATE USER AND PASSWORD AND GENERATE (OR GET FROM DB) SHORT LIVED TOKEN####
 @app.post("/credentials")
 def credentials():
     username = request.form.get("username")
     password = request.form.get("password")
-    
 
     #validate that username and password have valids requirements
     if (user_validation(username) & pass_validation(password)):
        #connect to DB
        connection = psycopg2.connect(host="localhost", database="cct",port=5432, user="gleschevich", password="32220")
        cursor = connection.cursor()
+
        #see if username and password are in DB
        query= """select * from users where name=%s and password=%s"""
        t=(username,hash_password(password))
        print (t)
        cursor.execute(query,t)
+
        #if user is already registered in DB
        if (cursor.rowcount ==0):
             query= """INSERT INTO users (name,password) VALUES (%s,%s)"""
@@ -120,12 +150,16 @@ def credentials():
        connection.commit()
        cursor.close()
        connection.close()
+       if not is_safe_redirect_url(redirect_url):
+           abort(400, "Invalid redirect URL")
+       #redirect to the url given in the form
        return redirect(redirect_url)
 
     #user or password incorrect
     else:
         return "Username or Password invalid"
 
+####GET USER FROM SHORT LIVED TOKEN TABLE AND GENERATE OR GET LONG LIVED TOKEN####
 @app.route("/access_token")
 def get_access_token():
     
@@ -135,12 +169,11 @@ def get_access_token():
 
     #Get username 
     query= """SELECT name from tokens where token = %s"""
-    print (query)
-    print(short_lived_token)
     
     cursor.execute(query,(short_lived_token,))
    
     username = cursor.fetchall()
+
     #if user token does not exist
     if not username:
         print("Unexisting token")
@@ -161,15 +194,19 @@ def get_access_token():
             #if user have long lived token just return it
             print("user already have lltoken")
             long_lived_token = list[0][0]
-    
+    user_token={
+        "username": username[0][0],
+        "long_lived_token": list[0][0]
+    }
     connection.commit()
     cursor.close()
     connection.close()
+
     
-    return long_lived_token
+    return json.dumps(user_token)
 
    
-
+####GLOGIN WEB####
 @app.route("/home")
 def home():
     delete_expired_tokens()
@@ -240,37 +277,5 @@ def home():
 
 '''.replace("|url|", request.args.get("redirect_url"))
 
-""" 
-appConfig={
-    "OAUTH2_CLIENT_ID": "0000",
-    "OAUTH2_CLIENT_SECRET": "secret",
-    "OAUTH2_ISSUER": "0000",
-    "FLASK_SECRET": "fsecret",
-    "FLASK_PORT": "5432"
-    
-    
-}
-
-app.secret_key = appConfig.get("FLASK_SECRET")
-
-oauth = OAuth(app)
-oauth.register(
-    "myServer",
-    client_id = appConf.get("OAUTH2_CLIENT_ID"),
-    client_secret = appConfig.get("OAUTH2_CLIENT_SECRET"),
-    client_kwargs={
-        "scope": "open id profile"
-    },
-    server_metadata_url=f
-
-)
- """
-
-
-
-
-
-
-
-
+#run the server in the host and port given
 app.run(host="0.0.0.0",port=5000)
