@@ -79,7 +79,6 @@ def pass_validation(password:str):
                 dig+=1
             if (c in ['¬','!','£','$','%','^','&','*','(','_','+',')','@','.',':',';','#','"']):
                 sym+=1
-            print(sym,dig,up,low)
     if(low>=1 and up>=1 and dig>=1 and sym>=1 and low+up+dig+sym == len(password)):
         print("Valid password!")
         return True
