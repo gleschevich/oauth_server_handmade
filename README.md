@@ -11,4 +11,5 @@ Setup and configuration instructions:
 - Username and password requirements to login:
     - username: must be minimum 8 characters, maximum 30 characters.
     - password: must be minimum 12 characters incluiding at least 1 number, 1 special caracter, 1 upper case and 1 lower case.
-  
+
+- Considerations for users, password and tokens: if user exists the server validate user and password combination, if user does not exists in DB the server register user and pass combination in DB
